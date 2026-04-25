@@ -2,12 +2,11 @@
 //  ContentView.swift
 //  gitStar
 //
-//  Created by 茂木史明 on 2026/04/25.
-//
 
 import SwiftUI
 
 struct ContentView: View {
+    var startFresh: Bool = false
     @State private var vm = GameViewModel()
 
     var body: some View {
@@ -15,43 +14,59 @@ struct ContentView: View {
             ZStack {
                 Color.gitStarBackground.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    // 上：街 UI
-                    CityStageView(git: vm.git)
-                        .frame(height: geo.size.height * 0.55)
+                if vm.mode == .arcComplete {
+                    if let arc = vm.completedArc {
+                        ArcCompleteView(arc: arc) {
+                            vm.startNextArc()
+                        }
+                        .transition(.opacity)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        // 上：街UI
+                        CityStageView(git: vm.git, arcNumber: vm.currentArcNumber)
+                            .frame(height: geo.size.height * 0.55)
 
-                    // 下：モードで切り替わるパネル
-                    Group {
-                        switch vm.mode {
-                        case .story:
-                            DialogueView(engine: vm.dialogueEngine)
-                        case .mission:
-                            if let mission = vm.currentMission {
-                                MissionView(
-                                    mission: mission,
-                                    git: vm.git,
-                                    inputText: $vm.commandInput,
-                                    onSubmit: { vm.submitCommand($0) }
-                                )
-                            }
-                        case .result:
-                            if let result = vm.lastResult {
-                                ResultView(result: result, onContinue: { vm.continueAfterResult() })
+                        // 下：モード切り替えパネル
+                        Group {
+                            switch vm.mode {
+                            case .story:
+                                DialogueView(engine: vm.dialogueEngine)
+                            case .mission:
+                                if let mission = vm.currentMission {
+                                    MissionView(
+                                        mission: mission,
+                                        git: vm.git,
+                                        inputText: $vm.commandInput,
+                                        history: vm.commandHistory,
+                                        onSubmit: { vm.submitCommand($0) }
+                                    )
+                                }
+                            case .result:
+                                if let result = vm.lastResult {
+                                    ResultView(result: result, onContinue: { vm.continueAfterResult() })
+                                }
+                            case .arcComplete:
+                                EmptyView()
                             }
                         }
+                        .frame(height: geo.size.height * 0.45)
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.3), value: vm.mode)
                     }
-                    .frame(height: geo.size.height * 0.45)
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.3), value: vm.mode)
                 }
             }
         }
         .ignoresSafeArea(.keyboard)
-        .onAppear { vm.start() }
+        .onAppear {
+            if startFresh { SaveManager.reset() }
+            vm.start()
+        }
+        .animation(.easeInOut(duration: 0.5), value: vm.mode)
     }
 }
 
-// MARK: - ViewModel（ゲーム進行管理）
+// MARK: - GameViewModel
 @MainActor
 @Observable
 class GameViewModel {
@@ -61,24 +76,43 @@ class GameViewModel {
     var currentMission: Mission? = nil
     var lastResult: CommandResult? = nil
     var commandInput: String = ""
+    var commandHistory: [String] = []
+    var completedArc: Arc? = nil
 
-    private var episodes: [Episode] = Arc1.episodes
+    private var allArcs: [Arc] = GameContent.arcs
+    private var arcIndex: Int = 0
     private var episodeIndex: Int = 0
 
+    var currentArcNumber: Int { allArcs[safe: arcIndex]?.number ?? 1 }
+
+    private var currentEpisodes: [Episode] {
+        allArcs[safe: arcIndex]?.episodes ?? []
+    }
+
+    // MARK: - 開始
     func start() {
         let saved = SaveManager.load()
+        arcIndex = saved.arcIndex
         episodeIndex = saved.episodeIndex
         loadEpisode()
     }
 
+    // MARK: - エピソード読み込み
     func loadEpisode() {
-        guard episodeIndex < episodes.count else { return }
-        let ep = episodes[episodeIndex]
+        guard episodeIndex < currentEpisodes.count else {
+            // Arc クリア
+            completedArc = allArcs[safe: arcIndex]
+            withAnimation { mode = .arcComplete }
+            return
+        }
+        let ep = currentEpisodes[episodeIndex]
 
-        // ダイアログ終了後にミッションへ
+        // onLoad セットアップ（ep7 の remote など）
+        ep.onLoad?(git)
+
         dialogueEngine.onFinished = { [weak self] in
             guard let self else { return }
-            if let mission = self.episodes[self.episodeIndex].mission {
+            if let mission = self.currentEpisodes[safe: self.episodeIndex]?.mission {
                 withAnimation { self.mode = .mission }
                 self.currentMission = mission
                 self.commandInput = ""
@@ -89,52 +123,58 @@ class GameViewModel {
 
         mode = .story
         dialogueEngine.load(ep.lines)
-        SaveManager.save(episodeIndex: episodeIndex)
+        SaveManager.save(arcIndex: arcIndex, episodeIndex: episodeIndex)
     }
 
+    // MARK: - コマンド送信
     func submitCommand(_ cmd: String) {
         guard let mission = currentMission else { return }
+
+        // ヒストリー追加
+        commandHistory.removeAll { $0 == cmd }
+        commandHistory.append(cmd)
+
         let gitResult = git.apply(command: cmd)
 
         if mission.validate(cmd) {
-            // ミッション検証が通れば必ず success 扱い
             lastResult = .success(gitResult.message)
-            dialogueEngine.onFinished = { [weak self] in
-                self?.nextEpisode()
-            }
             withAnimation { mode = .result }
         } else {
-            // 失敗：失敗フィードバック
             lastResult = .failure(mission.failLine.text)
             withAnimation { mode = .result }
         }
         commandInput = ""
     }
 
+    // MARK: - 結果後の処理
     func continueAfterResult() {
         guard let result = lastResult else { return }
         if result.isSuccess {
-            // 成功セリフを表示してから次へ
             if let mission = currentMission {
                 dialogueEngine.onFinished = { [weak self] in self?.nextEpisode() }
                 mode = .story
                 dialogueEngine.load([mission.successLine])
             }
         } else {
-            // 失敗：ミッションに戻る
             mode = .mission
             commandInput = ""
         }
     }
 
-    private func nextEpisode() {
-        episodeIndex += 1
-        if episodeIndex < episodes.count {
+    // MARK: - 次のArc開始
+    func startNextArc() {
+        arcIndex += 1
+        episodeIndex = 0
+        git = GitState()   // Gitステートをリセット
+        if arcIndex < allArcs.count {
+            completedArc = nil
             loadEpisode()
         }
     }
+
+    private func nextEpisode() {
+        episodeIndex += 1
+        loadEpisode()
+    }
 }
 
-#Preview {
-    ContentView()
-}

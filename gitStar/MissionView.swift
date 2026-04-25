@@ -30,6 +30,26 @@ func shortcutsFor(hint: String) -> [CommandShortcut] {
         .init(label: "git checkout",   fill: "git checkout ",           needsCursor: false),
         .init(label: "git merge",      fill: "git merge ",              needsCursor: false),
         .init(label: "git remote add", fill: "git remote add origin ",  needsCursor: false),
+        // Arc3
+        .init(label: "git diff",       fill: "git diff",                needsCursor: false),
+        .init(label: "git stash",      fill: "git stash",               needsCursor: false),
+        .init(label: "git stash pop",  fill: "git stash pop",           needsCursor: false),
+        // Arc4
+        .init(label: "git revert",     fill: "git revert HEAD",         needsCursor: false),
+        .init(label: "git reset --soft", fill: "git reset --soft HEAD~1", needsCursor: false),
+        .init(label: "git reset --mixed", fill: "git reset --mixed HEAD~1", needsCursor: false),
+        .init(label: "git reset --hard", fill: "git reset --hard HEAD~1", needsCursor: false),
+        .init(label: "git reflog",     fill: "git reflog",              needsCursor: false),
+        // Arc5
+        .init(label: "git rebase",     fill: "git rebase ",             needsCursor: false),
+        .init(label: "git rebase -i",  fill: "git rebase -i HEAD~3",   needsCursor: false),
+        .init(label: "git cherry-pick", fill: "git cherry-pick ",       needsCursor: false),
+        .init(label: "git tag",        fill: "git tag ",                needsCursor: false),
+        // Arc6
+        .init(label: "git blame",      fill: "git blame ",              needsCursor: false),
+        .init(label: "git bisect",     fill: "git bisect ",             needsCursor: false),
+        .init(label: "git log --graph", fill: "git log --oneline --graph --all", needsCursor: false),
+        .init(label: "touch .gitignore", fill: "touch .gitignore",      needsCursor: false),
     ]
 
     // ヒントに近いコマンドを先頭に並べ替える
@@ -43,14 +63,16 @@ struct MissionView: View {
     let mission: Mission
     let git: GitState
     @Binding var inputText: String
+    let history: [String]
     let onSubmit: (String) -> Void
 
     @FocusState private var focused: Bool
     @State private var showHint = false
     @State private var shakeTrigger = false
-    @State private var cursorInQuotes = false   // commit -m "" でカーソル位置管理
+    @State private var historyIndex: Int = -1   // -1 = 入力中、0以上 = ヒストリー参照中
 
     private var shortcuts: [CommandShortcut] { shortcutsFor(hint: mission.hint) }
+    private var hasHistory: Bool { !history.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -172,12 +194,26 @@ struct MissionView: View {
                 if !inputText.isEmpty {
                     Button {
                         inputText = ""
+                        historyIndex = -1
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
                             .foregroundStyle(.white.opacity(0.3))
                     }
                 }
+
+                // ↑ ヒストリーボタン
+                Button { cycleHistory() } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(hasHistory ? .white.opacity(0.55) : .white.opacity(0.15))
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(hasHistory ? Color.white.opacity(0.07) : .clear)
+                        )
+                }
+                .disabled(!hasHistory)
 
                 Button { submit() } label: {
                     Image(systemName: "return")
@@ -210,6 +246,20 @@ struct MissionView: View {
         .onAppear { focused = true }
     }
 
+    // ↑ タップ → 最新から順に遡る。末尾まで行ったら最新に戻る
+    private func cycleHistory() {
+        guard !history.isEmpty else { return }
+        if historyIndex == -1 {
+            historyIndex = history.count - 1
+        } else if historyIndex > 0 {
+            historyIndex -= 1
+        } else {
+            historyIndex = history.count - 1
+        }
+        inputText = history[historyIndex]
+        focused = true
+    }
+
     // ショートカットボタンをタップ → 入力欄にセット
     private func applyShortcut(_ shortcut: CommandShortcut) {
         inputText = shortcut.fill
@@ -221,6 +271,7 @@ struct MissionView: View {
     private func submit() {
         let cmd = inputText.trimmingCharacters(in: .whitespaces)
         guard !cmd.isEmpty else { return }
+        historyIndex = -1
         onSubmit(cmd)
         if !mission.validate(cmd) {
             shakeTrigger.toggle()

@@ -2,27 +2,31 @@
 //  gitStarApp.swift
 //  gitStar
 //
-//  Created by 茂木史明 on 2026/04/25.
-//
 
 import SwiftUI
 
 @main
 struct gitStarApp: App {
     @State private var isLaunching = true
+    @State private var startFresh = false   // true = ニューゲーム
 
     var body: some Scene {
         WindowGroup {
             ZStack {
                 if isLaunching {
-                    LaunchView {
-                        withAnimation(.easeInOut(duration: 0.6)) {
-                            isLaunching = false
+                    LaunchView(
+                        onContinue: {
+                            startFresh = false
+                            withAnimation(.easeInOut(duration: 0.6)) { isLaunching = false }
+                        },
+                        onNewGame: {
+                            startFresh = true
+                            withAnimation(.easeInOut(duration: 0.6)) { isLaunching = false }
                         }
-                    }
+                    )
                     .transition(.opacity)
                 } else {
-                    ContentView()
+                    ContentView(startFresh: startFresh)
                         .transition(.opacity)
                 }
             }
