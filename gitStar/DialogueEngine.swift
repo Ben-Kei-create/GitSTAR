@@ -20,6 +20,8 @@ class DialogueEngine {
     var isTyping: Bool = false
     var isFinished: Bool = false
 
+    var onFinished: (() -> Void)? = nil
+
     private var typingTask: Task<Void, Never>?
 
     var currentLine: DialogueLine? {
@@ -41,17 +43,16 @@ class DialogueEngine {
 
     func advance() {
         if isTyping {
-            // タイプ中はスキップして全文表示
             typingTask?.cancel()
             displayedText = currentLine?.text ?? ""
             isTyping = false
         } else {
-            // 次のセリフへ
             if currentIndex + 1 < lines.count {
                 currentIndex += 1
                 startTyping()
             } else {
                 isFinished = true
+                onFinished?()
             }
         }
     }
@@ -65,7 +66,7 @@ class DialogueEngine {
             for char in line.text {
                 if Task.isCancelled { break }
                 displayedText.append(char)
-                let delay: UInt64 = char == "\n" ? 120_000_000 : 38_000_000
+                let delay: UInt64 = char == "\n" ? 100_000_000 : 36_000_000
                 try? await Task.sleep(nanoseconds: delay)
             }
             isTyping = false

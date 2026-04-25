@@ -9,9 +9,24 @@ import SwiftUI
 
 @main
 struct gitStarApp: App {
+    @State private var isLaunching = true
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ZStack {
+                if isLaunching {
+                    LaunchView {
+                        withAnimation(.easeInOut(duration: 0.6)) {
+                            isLaunching = false
+                        }
+                    }
+                    .transition(.opacity)
+                } else {
+                    ContentView()
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.6), value: isLaunching)
         }
     }
 }

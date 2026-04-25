@@ -8,127 +8,131 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var vm = GameViewModel()
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                Color.gitStarBackground
-                    .ignoresSafeArea()
+                Color.gitStarBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    CityStageView()
-                        .frame(height: geo.size.height * 0.58)
+                    // 上：街 UI
+                    CityStageView(git: vm.git)
+                        .frame(height: geo.size.height * 0.55)
 
-                    DialogueView(
-                        speaker: .of(.master),
-                        text: "ようこそ、Git 村へ。\n今日から君に、村の地図を任せよう。"
-                    )
-                    .frame(height: geo.size.height * 0.42)
+                    // 下：モードで切り替わるパネル
+                    Group {
+                        switch vm.mode {
+                        case .story:
+                            DialogueView(engine: vm.dialogueEngine)
+                        case .mission:
+                            if let mission = vm.currentMission {
+                                MissionView(
+                                    mission: mission,
+                                    git: vm.git,
+                                    inputText: $vm.commandInput,
+                                    onSubmit: { vm.submitCommand($0) }
+                                )
+                            }
+                        case .result:
+                            if let result = vm.lastResult {
+                                ResultView(result: result, onContinue: { vm.continueAfterResult() })
+                            }
+                        }
+                    }
+                    .frame(height: geo.size.height * 0.45)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: vm.mode)
                 }
             }
         }
+        .ignoresSafeArea(.keyboard)
+        .onAppear { vm.start() }
     }
 }
 
-// MARK: - 上：街UI（仮）
-struct CityStageView: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [.gitStarBackground, .gitStarDeepBlue],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+// MARK: - ViewModel（ゲーム進行管理）
+@MainActor
+@Observable
+class GameViewModel {
+    var git = GitState()
+    var dialogueEngine = DialogueEngine()
+    var mode: GameMode = .story
+    var currentMission: Mission? = nil
+    var lastResult: CommandResult? = nil
+    var commandInput: String = ""
 
-            StarsView()
+    private var episodes: [Episode] = Arc1.episodes
+    private var episodeIndex: Int = 0
 
-            VStack(spacing: 12) {
-                Spacer()
-                Text("GitSTAR")
-                    .font(.system(size: 32, weight: .thin, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .tracking(12)
-                Text("— 大崩壊の後、記録者たちが歩む村 —")
-                    .font(.system(size: 11, weight: .light))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .tracking(3)
-                Spacer()
+    func start() {
+        let saved = SaveManager.load()
+        episodeIndex = saved.episodeIndex
+        loadEpisode()
+    }
+
+    func loadEpisode() {
+        guard episodeIndex < episodes.count else { return }
+        let ep = episodes[episodeIndex]
+
+        // ダイアログ終了後にミッションへ
+        dialogueEngine.onFinished = { [weak self] in
+            guard let self else { return }
+            if let mission = self.episodes[self.episodeIndex].mission {
+                withAnimation { self.mode = .mission }
+                self.currentMission = mission
+                self.commandInput = ""
+            } else {
+                self.nextEpisode()
             }
         }
-    }
-}
 
-// MARK: - 星空演出
-struct StarsView: View {
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                ForEach(0..<40, id: \.self) { i in
-                    Circle()
-                        .fill(Color.white.opacity(Double.random(in: 0.2...0.8)))
-                        .frame(width: CGFloat.random(in: 1...2.5))
-                        .position(
-                            x: CGFloat.random(in: 0...geo.size.width),
-                            y: CGFloat.random(in: 0...geo.size.height)
-                        )
-                }
+        mode = .story
+        dialogueEngine.load(ep.lines)
+        SaveManager.save(episodeIndex: episodeIndex)
+    }
+
+    func submitCommand(_ cmd: String) {
+        guard let mission = currentMission else { return }
+        let gitResult = git.apply(command: cmd)
+
+        if mission.validate(cmd) {
+            // ミッション検証が通れば必ず success 扱い
+            lastResult = .success(gitResult.message)
+            dialogueEngine.onFinished = { [weak self] in
+                self?.nextEpisode()
             }
+            withAnimation { mode = .result }
+        } else {
+            // 失敗：失敗フィードバック
+            lastResult = .failure(mission.failLine.text)
+            withAnimation { mode = .result }
+        }
+        commandInput = ""
+    }
+
+    func continueAfterResult() {
+        guard let result = lastResult else { return }
+        if result.isSuccess {
+            // 成功セリフを表示してから次へ
+            if let mission = currentMission {
+                dialogueEngine.onFinished = { [weak self] in self?.nextEpisode() }
+                mode = .story
+                dialogueEngine.load([mission.successLine])
+            }
+        } else {
+            // 失敗：ミッションに戻る
+            mode = .mission
+            commandInput = ""
         }
     }
-}
 
-// MARK: - 下：ダイアログ
-struct DialogueView: View {
-    let speaker: Character
-    let text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                CharacterAvatar(character: speaker, size: 40)
-                Text(speaker.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(speaker.tint.opacity(0.85))
-                    .tracking(2)
-                Spacer()
-            }
-
-            Text(text)
-                .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(.white)
-                .lineSpacing(6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Spacer()
-
-            HStack {
-                Spacer()
-                Text("次へ  ›")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.gitStarAccent)
-                    .tracking(2)
-            }
+    private func nextEpisode() {
+        episodeIndex += 1
+        if episodeIndex < episodes.count {
+            loadEpisode()
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            Color.gitStarPanel
-                .overlay(
-                    Rectangle()
-                        .frame(height: 1)
-                        .foregroundStyle(Color.gitStarAccent.opacity(0.3)),
-                    alignment: .top
-                )
-        )
     }
-}
-
-// MARK: - カラー定義
-extension Color {
-    static let gitStarBackground = Color(red: 0.04, green: 0.05, blue: 0.09)
-    static let gitStarDeepBlue   = Color(red: 0.06, green: 0.09, blue: 0.16)
-    static let gitStarPanel      = Color(red: 0.08, green: 0.10, blue: 0.14)
-    static let gitStarAccent     = Color(red: 0.56, green: 0.85, blue: 1.00)
 }
 
 #Preview {
