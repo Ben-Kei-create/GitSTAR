@@ -5,22 +5,236 @@
 
 import SwiftUI
 
+// MARK: - メイン（レビュー → COMPLETE の 2 フェーズ）
 struct ArcCompleteView: View {
     let arc: Arc
     let onNext: () -> Void
 
-    @State private var appeared = false
-    @State private var starsExplode = false
-    @State private var commandsVisible = false
-    @State private var buttonVisible = false
+    @State private var phase: Phase = .review    // 最初はコマンドレビュー
+    @State private var reviewPage = 0
+
+    enum Phase { case review, complete }
+
+    // このArcで学んだコマンドのガイドエントリを生成
+    private var commandCards: [(String, CommandGuideEntry)] {
+        arc.commands.compactMap { cmd in
+            if let entry = CommandGuide.entry(for: cmd) {
+                return (cmd, entry)
+            }
+            return nil
+        }
+    }
 
     var body: some View {
         ZStack {
             Color.gitStarBackground.ignoresSafeArea()
             StarsView()
+
+            if phase == .review {
+                reviewView
+                    .transition(.asymmetric(
+                        insertion: .opacity,
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+            } else {
+                completeView
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .opacity
+                    ))
+            }
+        }
+        .animation(.easeInOut(duration: 0.45), value: phase)
+    }
+
+    // MARK: - レビューフェーズ
+    @ViewBuilder
+    private var reviewView: some View {
+        VStack(spacing: 0) {
+
+            // ── ヘッダー ──
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Arc \(arc.number) クリア！")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.gitStarAccent.opacity(0.7))
+                        .tracking(3)
+                    Text("おさらい")
+                        .font(.system(size: 22, weight: .thin))
+                        .foregroundStyle(.white)
+                        .tracking(4)
+                }
+                Spacer()
+                // スキップ
+                Button {
+                    withAnimation { phase = .complete }
+                } label: {
+                    Text("スキップ")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 56)
+            .padding(.bottom, 20)
+
+            // ── カードページャー ──
+            if commandCards.isEmpty {
+                Spacer()
+                Text("このArcではコマンドを学んだよ！")
+                    .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+            } else {
+                TabView(selection: $reviewPage) {
+                    ForEach(Array(commandCards.enumerated()), id: \.offset) { i, pair in
+                        CommandCardView(command: pair.0, entry: pair.1)
+                            .tag(i)
+                            .padding(.bottom, 16)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .always))
+                .animation(.easeInOut(duration: 0.3), value: reviewPage)
+            }
+
+            // ── 進むボタン ──
+            Button {
+                if !commandCards.isEmpty && reviewPage < commandCards.count - 1 {
+                    withAnimation { reviewPage += 1 }
+                } else {
+                    withAnimation { phase = .complete }
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Text((!commandCards.isEmpty && reviewPage < commandCards.count - 1)
+                         ? "次のコマンド"
+                         : "Arc Complete！")
+                        .font(.system(size: 15, weight: .medium, design: .monospaced))
+                        .tracking(2)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(Color.gitStarBackground)
+                .padding(.horizontal, 36)
+                .padding(.vertical, 14)
+                .background(
+                    Capsule()
+                        .fill(Color.gitStarAccent)
+                        .shadow(color: Color.gitStarAccent.opacity(0.45), radius: 14)
+                )
+            }
+            .padding(.bottom, 48)
+        }
+    }
+
+    // MARK: - COMPLETE フェーズ（既存のアニメーション付き）
+    @ViewBuilder
+    private var completeView: some View {
+        CompleteScreenView(arc: arc, onNext: onNext)
+    }
+}
+
+// MARK: - コマンドカード
+struct CommandCardView: View {
+    let command: String
+    let entry: CommandGuideEntry
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 22) {
+
+                // アイコン
+                ZStack {
+                    Circle()
+                        .fill(entry.color.opacity(0.10))
+                        .frame(width: 76, height: 76)
+                    Circle()
+                        .stroke(entry.color.opacity(0.3), lineWidth: 1)
+                        .frame(width: 76, height: 76)
+                    Image(systemName: entry.icon)
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(entry.color)
+                }
+
+                // コマンド名
+                Text(command)
+                    .font(.system(size: 21, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+
+                // 説明
+                Text(entry.what)
+                    .font(.system(size: 14, weight: .light))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .multilineTextAlignment(.center)
+
+                // 使用例
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("使い方")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(entry.color.opacity(0.6))
+                        .tracking(3)
+                    Text(entry.example)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(entry.color.opacity(0.95))
+                        .lineSpacing(5)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(entry.color.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(entry.color.opacity(0.20), lineWidth: 1)
+                        )
+                )
+
+                // コツ
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.yellow.opacity(0.7))
+                        .padding(.top, 2)
+                    Text(entry.tip)
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(.white.opacity(0.52))
+                        .lineSpacing(4)
+                }
+                .padding(.horizontal, 4)
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 10)
+            .padding(.bottom, 20)
+        }
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(white: 0.055))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(entry.color.opacity(0.18), lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, 20)
+    }
+}
+
+// MARK: - COMPLETE スクリーン（既存のアニメーション）
+private struct CompleteScreenView: View {
+    let arc:    Arc
+    let onNext: () -> Void
+
+    @State private var appeared        = false
+    @State private var starsExplode    = false
+    @State private var commandsVisible = false
+    @State private var buttonVisible   = false
+
+    var body: some View {
+        ZStack {
             confettiLayer
 
-            VStack(spacing: 32) {
+            VStack(spacing: 28) {
                 Spacer()
 
                 // Arc バッジ
@@ -74,15 +288,20 @@ struct ArcCompleteView: View {
                         .foregroundStyle(.white.opacity(0.35))
                         .tracking(3)
 
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    LazyVGrid(
+                        columns: [GridItem(.flexible()), GridItem(.flexible())],
+                        spacing: 8
+                    ) {
                         ForEach(Array(arc.commands.enumerated()), id: \.offset) { i, cmd in
                             HStack(spacing: 8) {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(Color.gitStarAccent)
                                 Text(cmd)
-                                    .font(.system(size: 12, design: .monospaced))
+                                    .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(.white.opacity(0.8))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
                                 Spacer()
                             }
                             .padding(.horizontal, 12)
@@ -91,7 +310,10 @@ struct ArcCompleteView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .opacity(commandsVisible ? 1 : 0)
                             .offset(y: commandsVisible ? 0 : 10)
-                            .animation(.easeOut(duration: 0.4).delay(0.9 + Double(i) * 0.08), value: commandsVisible)
+                            .animation(
+                                .easeOut(duration: 0.4).delay(0.6 + Double(i) * 0.07),
+                                value: commandsVisible
+                            )
                         }
                     }
                 }
@@ -121,15 +343,15 @@ struct ArcCompleteView: View {
                 }
                 .opacity(buttonVisible ? 1 : 0)
                 .scaleEffect(buttonVisible ? 1 : 0.85)
-                .animation(.spring(duration: 0.6, bounce: 0.3).delay(1.6), value: buttonVisible)
+                .animation(.spring(duration: 0.6, bounce: 0.3).delay(1.4), value: buttonVisible)
                 .padding(.bottom, 60)
             }
         }
         .onAppear {
             appeared = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { starsExplode = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { commandsVisible = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { buttonVisible = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { starsExplode    = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { commandsVisible = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { buttonVisible   = true }
         }
     }
 
@@ -138,7 +360,8 @@ struct ArcCompleteView: View {
         GeometryReader { geo in
             ZStack {
                 ForEach(0..<20, id: \.self) { i in
-                    Image(systemName: i % 3 == 0 ? "sparkle" : i % 3 == 1 ? "star.fill" : "circle.fill")
+                    Image(systemName: i % 3 == 0 ? "sparkle"
+                                    : i % 3 == 1 ? "star.fill" : "circle.fill")
                         .font(.system(size: CGFloat.random(in: 6...14)))
                         .foregroundStyle(
                             [Color.gitStarAccent,
@@ -148,8 +371,8 @@ struct ArcCompleteView: View {
                         )
                         .position(
                             x: starsExplode
-                                ? CGFloat.random(in: 20...geo.size.width - 20)
-                                : geo.size.width / 2,
+                                ? CGFloat.random(in: 20...geo.size.width  - 20)
+                                : geo.size.width  / 2,
                             y: starsExplode
                                 ? CGFloat.random(in: 20...geo.size.height * 0.6)
                                 : geo.size.height * 0.35

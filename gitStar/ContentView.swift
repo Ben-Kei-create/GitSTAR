@@ -57,7 +57,6 @@ struct ContentView: View {
                 }
             }
         }
-        .ignoresSafeArea(.keyboard)
         .onAppear {
             if startFresh { SaveManager.reset() }
             vm.start()
