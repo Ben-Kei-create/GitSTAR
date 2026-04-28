@@ -8,6 +8,7 @@ import SwiftUI
 struct LaunchView: View {
     let onContinue: () -> Void
     let onNewGame: () -> Void
+    var onPrototype: (() -> Void)? = nil
 
     @State private var starOpacities: [Double] = (0..<60).map { _ in Double.random(in: 0.1...0.9) }
     @State private var twinkleTrigger = false
@@ -309,6 +310,27 @@ struct LaunchView: View {
                     .tracking(3)
             }
             .padding(.top, 4)
+
+            // プロトタイプボタン（開発用）
+            if let onPrototype {
+                Button(action: onPrototype) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10))
+                        Text("Arc 4 reflog プロトタイプ")
+                            .font(.system(size: 11, weight: .light, design: .monospaced))
+                            .tracking(2)
+                    }
+                    .foregroundStyle(Color(red: 0.9, green: 0.7, blue: 0.4).opacity(0.55))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color(red: 0.9, green: 0.7, blue: 0.4).opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .padding(.top, 16)
+            }
         }
         .padding(.horizontal, 40)
     }

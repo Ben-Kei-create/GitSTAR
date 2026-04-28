@@ -9,11 +9,19 @@ import SwiftUI
 struct gitStarApp: App {
     @State private var isLaunching = true
     @State private var startFresh = false   // true = ニューゲーム
+    @State private var showPrototype = false  // Arc4 reflog プロトタイプ
 
     var body: some Scene {
         WindowGroup {
             ZStack {
-                if isLaunching {
+                if showPrototype {
+                    Arc4ReflogPrototype(onExit: {
+                        withAnimation(.easeInOut(duration: 0.5)) {
+                            showPrototype = false
+                        }
+                    })
+                    .transition(.opacity)
+                } else if isLaunching {
                     LaunchView(
                         onContinue: {
                             startFresh = false
@@ -22,6 +30,11 @@ struct gitStarApp: App {
                         onNewGame: {
                             startFresh = true
                             withAnimation(.easeInOut(duration: 0.6)) { isLaunching = false }
+                        },
+                        onPrototype: {
+                            withAnimation(.easeInOut(duration: 0.5)) {
+                                showPrototype = true
+                            }
                         }
                     )
                     .transition(.opacity)
@@ -31,6 +44,7 @@ struct gitStarApp: App {
                 }
             }
             .animation(.easeInOut(duration: 0.6), value: isLaunching)
+            .animation(.easeInOut(duration: 0.5), value: showPrototype)
         }
     }
 }
